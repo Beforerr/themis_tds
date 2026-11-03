@@ -1,0 +1,112 @@
+{
+  "bgwindow": {
+    "120": {
+      "ang_event": 7.626,
+      "ang_halves": 9.849,
+      "dVpar": 3.522,
+      "halves_gt30": 0.2378
+    },
+    "1200": {
+      "ang_event": 12.41,
+      "ang_halves": 12.93,
+      "dVpar": 4.678,
+      "halves_gt30": 0.2904
+    },
+    "15": {
+      "ang_event": 2.995,
+      "ang_halves": 7.25,
+      "dVpar": 8.86,
+      "halves_gt30": 0.2012
+    },
+    "30": {
+      "ang_event": 4.373,
+      "ang_halves": 8.624,
+      "dVpar": 7.23,
+      "halves_gt30": 0.2294
+    },
+    "300": {
+      "ang_event": 9.652,
+      "ang_halves": 10.49,
+      "dVpar": 0.0,
+      "halves_gt30": 0.2406
+    },
+    "60": {
+      "ang_event": 5.979,
+      "ang_halves": 9.566,
+      "dVpar": 5.601,
+      "halves_gt30": 0.2359
+    },
+    "600": {
+      "ang_event": 11.27,
+      "ang_halves": 11.25,
+      "dVpar": 2.56,
+      "halves_gt30": 0.255
+    }
+  },
+  "debye_sheath": 16.39,
+  "det_status": {
+    "no_b": 0.001438,
+    "no_burst": 0.0002696,
+    "no_tds": 0.189,
+    "tds": 0.8093
+  },
+  "frac_bg_unsteady": 0.2394,
+  "frac_burst_moments": 0.858,
+  "frac_clip": 0.2041,
+  "frac_efw": 0.9997,
+  "frac_fgm": 0.9907,
+  "frac_moments": 0.9788,
+  "frac_phase_flag": 0.01906,
+  "lang_corr_B_z": 0.8937,
+  "lang_corr_efw_Epar": 0.8417,
+  "mom_mask": {
+    "ele_lowN": 0.007011,
+    "ion_isotropic": 0.001798,
+    "ion_lowN": 0.001528
+  },
+  "n_days": 2413,
+  "n_events": 11126,
+  "pipeline": "b0419c0f40",
+  "region": {
+    "PS": {
+      "N": 1724,
+      "bg_unsteady": 0.1085,
+      "clip": 0.1404
+    },
+    "PSBL": {
+      "N": 1943,
+      "bg_unsteady": 0.03603,
+      "clip": 0.1642
+    },
+    "dayside/inner": {
+      "N": 2285,
+      "bg_unsteady": 0.1602,
+      "clip": 0.2118
+    },
+    "lobe": {
+      "N": 486,
+      "bg_unsteady": 0.02881,
+      "clip": 0.3889
+    },
+    "sheath/SW": {
+      "N": 4392,
+      "bg_unsteady": 0.4479,
+      "clip": 0.2209
+    },
+    "unknown": {
+      "N": 296,
+      "bg_unsteady": 0.1813,
+      "clip": 0.2253
+    }
+  },
+  "tds_efw_corr": 0.9392,
+  "tds_frac_by_region": {
+    "PS": 0.8654,
+    "PSBL": 0.9213,
+    "dayside/inner": 0.8118,
+    "lobe": 0.9527,
+    "sheath/SW": 0.7329,
+    "unknown": 0.625
+  },
+  "tds_span_med": 3.762
+}

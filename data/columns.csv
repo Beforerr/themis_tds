@@ -1,0 +1,51 @@
+name,unit,source,description
+id,"",ours,"event (list interval) index, sorted by start time"
+"start_time, end_time",UT,Lang,"wave-burst interval containing the TDS (not the TDS itself; see tds_start/tds_end), floored to 1 s"
+duration,s,Lang,end − start (unfloored)
+radius,RE,Lang,"geocentric distance, burst mean"
+"gsm_x, gsm_y, gsm_z",RE,Lang,"position GSM, burst mean"
+"mlt, mlat","h, deg",Lang,"MLT and magnetic latitude: SM, mean of burst start and end"
+"lang_max_Ez, lang_rms_Ew",mV/m,Lang,"Lang's max |E∥| (100–3000 Hz, unrecorded sub-window) and FBK rms E (start ±30 s; whole-day max on many 2016–2022 days); report.typ, Lang's list section"
+"lang_Bx, lang_By, lang_Bz",nT,Lang,Lang's B GSM: mean fgs over start ±30 s
+"B_x, B_y, B_z, B_t",nT,ours,"FGM fgl GSM B, component medians over the interval (fgs ±1.5 s if no fgl); B_t = |B|"
+"Bbg_x, Bbg_y, Bbg_z, Bbg_t",nT,ours,background B GSM: fgs medians over tc ±5 min
+"theta_B, theta_Bbg",deg,ours,elevation atan(Bz/√(Bx²+By²)) of interval / background B
+Bx_over_Bt,"",ours,"|Bx|/|B|: ~1 in lobe/PSBL, ~0 at the neutral sheet"
+dBz_1min,nT,ours,"median Bz in [tc, tc+1 min] − [tc−1 min, tc]; dipolarization indicator"
+"Ni, Ti, Ti_par, Ti_perp","cm⁻³, eV, eV, eV",ours,"ion density, average/parallel/perpendicular temperature: mean of spin samples within the interval ±1.5 s; GMOM ESA+SST burst (ptibb), else reduced (ptirf)"
+"Vi_x, Vi_y, Vi_z, Vi_t",km/s,ours,"ion bulk velocity GSM and |V|, same samples"
+"V_par_5min, V_perp_5min",km/s,ours,"V·b̂ and |V⊥|, b̂ from the ±5-min background B (steady magnetosphere; window-dependent if bg_rot > 30°)"
+"Vperp_5min_x, Vperp_5min_y, Vperp_5min_z",km/s,ours,"V⊥ GSM, same b̂"
+"V_par_30s, V_perp_30s",km/s,ours,"same with b̂ from fgs medians over tc ±30 s (sheath, where the field rotates within a minute)"
+bg_rot,deg,ours,"angle between fgs medians over [tc−5 min, tc] and [tc, tc+5 min]; large ⇒ background window straddles a boundary"
+Vx_peak_5min,km/s,ours,"ion Vx (reduced mode) with largest |Vx| within tc ±5 min, 3-spin running median (flow-burst indicator)"
+"Ne, Te, Te_par, Te_perp","cm⁻³, eV, eV, eV",ours,"electron moments, same samples; GMOM burst (ptebb), else reduced (pterf)"
+"beta_i, beta_e, beta","",ours,"2μ0 n T / B² for ions, electrons, total"
+debye_m,m,ours,electron Debye length √(ε0 Te / n_e e²)
+fpe_fce,"",ours,f_pe/f_ce
+VA_kms,km/s,ours,Alfvén speed (protons)
+"Te_Ti, Ti_aniso, Te_aniso","",ours,"Te/Ti, Ti⊥/Ti∥, Te⊥/Te∥ (Te_aniso meaningful only when mom_burst & 2)"
+"flag_ion, flag_ele","",ours,OR of GMOM quality flags over the moment samples (-1: no data)
+mom_burst,"",ours,"moment source bits: 1 = ion burst, 2 = electron burst; else reduced mode"
+mom_mask,"",ours,"masked-moment bits: 1 = ion, 2 = electron n < 1e-3 cm⁻³ (SST-only sums, all moments NaN); 4 = ion V ≈ 0 and T⊥ ≡ T∥ (no angular information; V, T∥, T⊥ NaN)"
+"n_fgm, n_fgm_bg, n_ion, n_ele","",ours,"sample counts: FGM interval, FGM background, ion and electron moments"
+"BX_GSE, BY_GSM, BZ_GSM",nT,ours,"OMNI 1-min IMF (bow-shock-nose time), mean of the minutes overlapping the interval"
+BZ_GSM_1h,nT,ours,IMF Bz mean over the hour before the interval
+"flow_speed, proton_density, Pressure","km/s, cm⁻³, nPa",ours,"solar wind speed, density, dynamic pressure, same minutes"
+"AE_INDEX, AL_INDEX, SYM_H",nT,ours,"AE, AL, SYM-H, same minutes"
+"AL_min_1h, AE_max_1h",nT,ours,"min AL, max AE in the hour before the interval"
+Kp,"",ours,Kp (OMNI2 hourly) at start_time
+r_over_rmp,"",ours,r / Shue98 magnetopause radius at the same angle
+region,"",ours,"heuristic region: sheath/SW, dayside/inner (X>−5), PS, PSBL, lobe"
+efw_window,"",ours,"window of all efw_* stats: tds = detector TDS window (tds_start–tds_end), list = Lang's [start, end + 1 s] where no TDS was detected"
+"efw_n, efw_ac","",ours,"# efw waveform samples in the window (8192 or 16384 S/s), fraction AC-coupled"
+"efw_t_Ez, efw_Ez, efw_Eperp_Ez, efw_ratio_Ez, efw_phi_Ez","UT, mV/m, mV/m, –, deg",ours,"at max |Ez| (DSL spin axis; own L1 calibration, 100–3000 Hz band-pass, boom-shadow phases masked): time, signed Ez, in-band |E⊥B|, |Ez|/|E⊥|, spin phase"
+"efw_t_Epar, efw_Epar, efw_Eperp_Epar, efw_ratio_Epar, efw_phi_Epar","UT, mV/m, mV/m, –, deg",ours,"same at max |E∥|, E∥ = E·b̂ with b̂ the window-median B"
+efw_phase_flag,"",ours,true if max |E∥| or |Ez| falls at an over-populated spin phase (likely artifact)
+"efw_rms_Ez, efw_rms_Exy",mV/m,ours,in-band rms Ez and spin-plane |E| over the window
+efw_clip,"",ours,"fraction of samples with a raw channel at the ADC rail (±32767, or −32768 = fill); > 0 ⇒ maxima are lower bounds (spin-plane AC saturates near 70 mV/m)"
+"Epar_norm, Ez_norm","",ours,"e|E∥|λ_D/T_e (≈ eφ/T_e for a Debye-scale structure), same with |Ez|"
+det_status,"",ours,"automatic detector (detect/report.typ) on the bursts overlapping [start, end + 1 s]: tds, no_tds, no_b (no b̂, never TDS), no_burst (none ≥ 4096 samples)"
+"tds_start, tds_end",UT,ours,"span of the detector's TDS trains in the interval: the TDS window, which Lang's list does not record"
+"tds_n_trains, tds_n_pulses, tds_class","",ours,number of TDS trains and TDS-like pulses; class (bipolar/unipolar/mixed) of the train with most pulses
+"tds_peak, tds_Epar_ratio, tds_clip","mV/m, –, –",ours,"largest TDS-like pulse (signed, E∥ or Ez, 150 Hz high-pass) and its in-band |E∥|/|E⊥|; max rail-sample fraction near the trains (> 0 ⇒ lower bound)"

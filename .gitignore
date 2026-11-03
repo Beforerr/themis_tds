@@ -1,0 +1,11 @@
+data/cdf/
+data/cache/
+*.pdf
+scratch/
+data/raw/AllData/
+data/*.log
+data/tds_tha.csv
+data/tds_tha.parquet
+data/bgwindow.csv
+detect/out/**/*.csv
+Manifest.toml

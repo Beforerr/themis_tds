@@ -1,0 +1,22 @@
+[deps]
+AlgebraOfGraphics = "cbdf2221-f076-402e-a563-3d30da359d67"
+CDAWeb = "950ff2a9-823f-469c-91a7-754a5d85edca"
+CDFDatasets = "075ae62b-f872-4368-b383-31e3aa6c3154"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DataFramesMeta = "1313f7d8-7da2-5740-9ea0-a2ca25f37964"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+FFTA = "b86e33f2-c0db-4aa1-a6e0-ab43e668529e"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Parquet2 = "98572fba-bba0-415d-956f-fa77e587d26d"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+TimeseriesUtilities = "31d49243-0742-49c1-b8d2-db113b74581e"
+
+[sources]
+CDAWeb = {path = "/Users/zijin/src/JuliaSpacePhysics/CDAWeb.jl"}
+CDFDatasets = {path = "/Users/zijin/src/JuliaSpacePhysics/CDFDatasets.jl"}
+TimeseriesUtilities = {path = "/Users/zijin/src/JuliaSpacePhysics/TimeseriesUtilities.jl"}
