@@ -64,17 +64,16 @@ A burst is detector-positive if it holds at least one `tds_*` train. Trains also
 
 = Artifacts <sec:art>
 
-*Sun shadow.* Before any cut, pulse phases pile up at $phi = 45° + k 90°$ (@fig:phase), where a spin-plane boom is shadowed by the spacecraft. In $E_z$ and $E_parallel$ these are clean few-ms bipolar pulses of up to tens of mV/m, morphologically identical to electron holes (@fig:exa row 3, @fig:exb row 4). Three cuts remove them:
+*Sun shadow.* Before any cut, pulse phases pile up at $phi = 45° + k 90°$ (@fig:phase), where a spin-plane boom is shadowed by the spacecraft. In $E_z$ and $E_parallel$ these are clean few-ms bipolar pulses of up to tens of mV/m, morphologically identical to electron holes (@fig:exa row 3, @fig:exb row 4). Two cuts remove them:
 
 + *spin recurrence*: a pulse recurs at the same phase (±1°) in at least half of the other spins of the burst, well above the chance count of a dense train (#s.cuts.rec pulses);
-+ *single-pair shadow*: the pulse lies within #P.shadoww° of 45° mod 90° and ≥ #pct(P.pair) of its spin-plane template energy sits on one boom pair (#s.cuts.shadow1 pulses);
 + *fixed phase mask* (#pct(s.frac_masked_phase, d: 1) of the spin, red in @fig:phase) for the residual excess.
 
-The shadow geometry changes around 2016 Q3: the 45°/225° peaks split to ±4.5°, so the mask is the union of both epochs. After the cuts, TDS-like pulses are flat in phase. In total #s.cuts.art of #s.n_pulses pulses are flagged as artifacts.
+The shadow geometry changes around 2016 Q3: the 45°/225° peaks split to ±4.5°, so the mask is the union of both epochs. After the cuts, TDS-like pulses within 2–10° of the shadow phases (outside the mask) are #num(s.tds_phase_near_far) times as frequent per degree as far from them. A cut on pulses that sit on a single boom pair near the shadow phases is not applied: field-aligned pulses do so whenever $hat(bold(b))$ lies along a pair, and outside the mask such pulses are no more common near the shadow phases than elsewhere, so the cut removed real TDS (about 30% of TDS-like pulses within 10° of the shadow phases) without removing artifacts. In total #s.cuts.art of #s.n_pulses pulses are flagged as artifacts.
 
 *ADC clipping.* Raw count −32768 is both the CDF fill value and negative full scale, so it reads as NaN; +32767 stays finite. Both are flagged as rail samples. NaN samples are interpolated for filtering, and pulses within ±#num(1000 * P.satw, d: 0) ms of a rail sample (#s.cuts.sat) are never TDS-like. Clipping is common: #pct(s.burst_clip.all) of all bursts, #pct(s.burst_clip.lang) of Lang bursts and #pct(s.burst_clip.det) of detector-positive bursts contain rail samples. Within ±#num(1000 * P.isow, d: 0) ms of a TDS train, #pct(s.tds_clip_frac) of trains have at least one rail sample, and #pct(s.tds_clip_frac_1pct) have more than 1%. Their peak amplitudes (`peak` in `detections.csv`) are lower bounds, and `clip` gives the fraction.
 
-#figure(image("figs/phase.png", width: 88%), caption: [Spin phase of all pulses (grey), after the recurrence and single-pair shadow cuts (blue), and TDS-like pulses (black), before/after 2016-07. Red: fixed mask.]) <fig:phase>
+#figure(image("figs/phase.png", width: 88%), caption: [Spin phase of all pulses (grey), after the recurrence cut (blue), and TDS-like pulses (black), before/after 2016-07. Red: fixed mask.]) <fig:phase>
 
 = Validation <sec:val>
 

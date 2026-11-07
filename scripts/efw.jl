@@ -2,13 +2,14 @@
 # Calibration follows SPEDAS thm_cal_efi.pro / thm_efi_despin.pro, with deviations marked below.
 # It matches L2 EFI `eff_dot0_dsl` to $10^(-6)$ mV/m on a test day.
 using CDFDatasets, Statistics, LinearAlgebra, DataFrames, Dates, TimeseriesUtilities, DSP
+@isdefined(ProbeDay) || include("daily.jl")
 
 # tha row of http://themis.ssl.berkeley.edu/data/themis/tha/l1/eff/0000/tha_efi_calib_params.txt
 # (single row, valid from 2002-01-01). Gains in V/count, boom lengths in m, DSC offset in mV/m (DSL).
 const THA_EFI = (edc_gain = 0.000457771, eac_gain = 7.7516e-5, edc_offset = (70.0, 113.0, 0.0),
     boom = (49.6, 40.4, 5.63), shorting = (0.714286, 0.714286, 0.5), dsc_offset = (2.5, 0.0, 0.0))
 
-# `searchsortedlast(v, x)` for queries that mostly land just past the previous result `i`."
+# `searchsortedlast(v, x)` for queries that mostly land just past the previous result `i`.
 function searchlast_from(v, x, i)
     1 <= i <= lastindex(v) && !isless(x, v[i]) || return searchsortedlast(v, x)
     for _ in 1:8
@@ -155,41 +156,45 @@ end
 _unix(t::DateTime) = datetime2unix(t)
 _unix(t::Real) = Float64(t)
 
+# Spin phases (deg) whose samples are excluded. Near φ ≡ 45° mod 90° a spin-plane boom points along the sun line;
+# E56 and the spin-plane pairs spike there (up to ~80 mV/m, broadband, so the band-pass keeps them) and would otherwise
+# set the event maxima. From ~2016 Q3 the 45° and 225° spikes split to c ± 4.5–6° (also found by detect/), and the 45°
+# one leaks to c + 10° (excess of max-|E∥| phases at 52° and 55°, post-2016 only), hence the wider, asymmetric intervals.
+# scripts/efwstages.jl shows the max-|E∥| phases without band-pass and mask.
+const EFW_MASK = ((38.0, 57.0), (131.0, 139.0), (218.0, 232.0), (311.0, 319.0))
+
 """
-    efw_events(efw_path, fgm_path, windows; probe = "tha", shadow, wake, wake_halfwidth) -> DataFrame
+    efw_events(d::ProbeDay, windows; mask = EFW_MASK, band = (100.0, 3000.0)) -> DataFrame
 
 Per (t0, t1) window (DateTime or unix s), stats of calibrated efw E (mV/m, DSL), band-passed by `bandpass!`, over
 samples in [t0, t1]. The band (100–3000 Hz, as Lang's `max_Ez`) holds ms-scale structures and removes the spin tone and
 slow wake/photoelectron excursions; its fixed upper edge makes 8192 and 16384 S/s bursts comparable. Background b̂ = median FGM fgl_dsl (fgs_dsl if no fgl) over the window. Columns:
-`n` (efw samples; 0 → NaN stats), `ac` (fraction AC-coupled), `Bx, By, Bz` (mean DSL B, nT);
+`n` (efw samples; 0 → NaN stats), `ac` (fraction AC-coupled), `Bx, By, Bz` (median DSL B, nT);
 `t_Ez, Ez, Eperp_Ez, ratio_Ez, phi_Ez`: time (unix s) and signed Ez at max |Ez|, |E⊥| there, |Ez|/|E⊥|, spin phase
 (deg, SSL→DSL rotation angle of `spinphase`) there; `t_Epar, Epar, Eperp_Epar, ratio_Epar, phi_Epar`: same for E∥ = E·b̂;
 `rms_Ez`, `rms_Exy` (√mean(Ex²+Ey²)); `clip`: fraction of samples with a raw channel at the 16-bit ADC
 rail (−32768 is also FILLVAL, so it reads as NaN; +32767 does not); maxima of events with clip > 0 are lower bounds. E∥, E⊥ and spin-plane stats need FGM spin phase (else NaN).
 
-`shadow` (phase => half-width, deg): samples near the phases where a spin-plane boom points along the sun line
-(φ ≡ 45° mod 90°) are excluded from all stats; E56 and the spin-plane pairs show spikes there
-(up to ~30 mV/m) that otherwise set the event maxima. From ~2016 Q3 the 45° and 225° spikes split to c ± 4.5–6°
-(also found by detect/), hence the wider mask there. `wake` phases (deg, ± `wake_halfwidth`) are a
-second artifact pair found empirically from the clustering of max-|E∥| phases over all events (~180° apart).
-`n` counts all samples. Residual clustering is flagged in build.jl (`efw_phase_flag`).
+`mask`: spin-phase intervals [lo, hi) (deg) excluded from all stats, see `EFW_MASK`; `band = nothing` skips the band-pass.
+`n` counts all samples.
 """
-function efw_events(efw_path, fgm_path, windows; probe = "tha", shadow = (45 => 7.0, 135 => 4.0, 225 => 7.0, 315 => 4.0),
-        wake = (165.0, 346.0), wake_halfwidth = 4.0)
-    rd(ds, k) = haskey(ds, k) && length(ds[k]) > 0 ? Array(ds[k]) : nothing
-    fg = CDFDataset(fgm_path)
-    tl, Bl, Sl = rd(fg, "$(probe)_fgl_time"), rd(fg, "$(probe)_fgl_dsl"), rd(fg, "$(probe)_fgl_ssl")
-    ts, Bs = rd(fg, "$(probe)_fgs_time"), rd(fg, "$(probe)_fgs_dsl")
+efw_events(d::ProbeDay, windows; kw...) = efw_stats!(efw_calibrated(d, windows); kw...)
+
+"Calibrated E of the bursts touching `windows`, with each window's sample range `j` into it and its b̂ field `B`."
+function efw_calibrated(d::ProbeDay, windows)
+    probe = d.probe
+    rd(kind, k) = dayvar(d, kind, k)
+    tl, Bl, Sl = rd(:fgm, "$(probe)_fgl_time"), rd(:fgm, "$(probe)_fgl_dsl"), rd(:fgm, "$(probe)_fgl_ssl")
+    ts, Bs = rd(:fgm, "$(probe)_fgs_time"), rd(:fgm, "$(probe)_fgs_dsl")
     φ, Tspin = tl === nothing || Sl === nothing ? (t -> fill(NaN, length(t)), 3.0) : spinphase(tl, Sl, Bl)
-    ew = CDFDataset(efw_path)
-    t::Vector{Float64} = rd(ew, "$(probe)_efw_time")
+    t::Vector{Float64} = rd(:efw, "$(probe)_efw_time")
     win = [(_unix(a), _unix(b)) for (a, b) in windows]
     idx = [searchsortedfirst(t, a):searchsortedlast(t, b) for (a, b) in win]
     # calibrate only the bursts touching an event; offsets need the whole 0.5 s-gap segment.
     # Reading just those records of the (lazy) waveform variable avoids loading the whole day.
     segs = filter(r -> any(i -> !isempty(intersect(i, r)), idx), find_continuous_indexranges(t, 0.5))
     before = cumsum([0; length.(segs)])
-    rawv = ew["$(probe)_efw"]
+    rawv = dayset(d, :efw)["$(probe)_efw"]
     tk = Vector{Float64}(undef, before[end]); raw = Matrix{eltype(rawv)}(undef, 3, before[end])
     for (k, r) in enumerate(segs)
         o = before[k]+1:before[k+1]
@@ -198,18 +203,27 @@ function efw_events(efw_path, fgm_path, windows; probe = "tha", shadow = (45 => 
     end
     # A window lies wholly inside kept segments, so its samples stay contiguous in `tk`.
     pos(x) = (k = searchsortedlast(segs, x; by = first); before[k] + x - first(segs[k]) + 1)
-    E, ac, ϕ = efi_dsl(tk, raw, rd(ew, "$(probe)_efw_hed_time"), rd(ew, "$(probe)_efw_hed_ac"), φ, Tspin)::Tuple{Matrix{Float64}, Vector{Bool}, Vector{Float64}}
-    bandpass!(E, tk)
-    masked(x) = any(((c, h),) -> abs(mod(x - c + 180, 360) - 180) < h, shadow) || any(w -> abs(mod(x - w + 180, 360) - 180) < wake_halfwidth, wake)
-    for k in eachindex(ϕ)
-        masked(rad2deg(ϕ[k])) && (E[:, k] .= NaN)
-    end
+    j = [isempty(i) ? (1:0) : (pos(first(i)):pos(last(i))) for i in idx]
+    E, ac, ϕ = efi_dsl(tk, raw, rd(:efw, "$(probe)_efw_hed_time"), rd(:efw, "$(probe)_efw_hed_ac"), φ, Tspin)::Tuple{Matrix{Float64}, Vector{Bool}, Vector{Float64}}
     medB(tb, B, a, b) = (tb === nothing ? nothing :
         (r = searchsortedfirst(tb, a):searchsortedlast(tb, b); isempty(r) ? nothing : vec(median(B[:, r], dims = 2))))  # median: FGM L2 has kilo-nT spikes
+    B = [something(medB(tl, Bl, a, b), medB(ts, Bs, a, b), fill(NaN, 3)) for (a, b) in win]
+    (; tk, raw, E, ac, ϕ, j, B)
+end
+
+"`efw_events` columns from `efw_calibrated` output `c`. Band-pass and mask overwrite `c.E`; with neither, it is left as is."
+function efw_stats!(c; mask = EFW_MASK, band = (100.0, 3000.0))
+    (; tk, raw, E, ac, ϕ) = c
+    isnothing(band) || bandpass!(E, tk; band)
+    if !isempty(mask)
+        for k in eachindex(ϕ)
+            x = mod(rad2deg(ϕ[k]), 360)
+            any(((lo, hi),) -> lo <= x < hi, mask) && (E[:, k] .= NaN)
+        end
+    end
     nanrms(x) = (m = count(!isnan, x); m == 0 ? NaN : sqrt(sum(v -> isnan(v) ? 0.0 : v^2, x) / m))
-    rows = map(zip(win, idx)) do ((a, b), i)
-        n = length(i); j = n == 0 ? (1:0) : (pos(first(i)):pos(last(i)))
-        B = something(medB(tl, Bl, a, b), medB(ts, Bs, a, b), fill(NaN, 3))
+    rows = map(c.j, c.B) do j, B
+        n = length(j)
         bh = B ./ norm(B)
         ez = view(E, 3, j)
         par = [bh[1] * E[1, k] + bh[2] * E[2, k] + bh[3] * E[3, k] for k in j]
@@ -229,25 +243,26 @@ function efw_events(efw_path, fgm_path, windows; probe = "tha", shadow = (45 => 
     DataFrame(rows)
 end
 
-"""Per-event `efw_*` columns for all events (needs themis.jl for `dayfile`). Window: the detector's TDS window
-(`tw`, from tdswindow.jl) where it found one, else Lang's [start, end + 1 s] (his times are 1 s floors)."""
-function efw_params(ev, tw = nothing)
-    ev = isnothing(tw) ? transform(ev, [:start_time, :end_time] => ByRow((a, b) -> (a, b + Second(1), "list")) => [:w0, :w1, :window]) :
-        transform(leftjoin(ev, select(tw, :id, :tds_start, :tds_end); on = :id), [:start_time, :end_time, :tds_start, :tds_end] =>
-            ByRow((a, b, c, d) -> ismissing(c) ? (a, b + Second(1), "list") : (c, d, "tds")) => [:w0, :w1, :window])
-    days = collect(groupby(transform(ev, :start_time => ByRow(Date) => :date), :date))
-    out = Vector{DataFrame}(undef, length(days))
-    Threads.@threads for i in eachindex(days)
-        g = days[i]
-        ef, fg = dayfile("efw", g.date[1]), dayfile("fgm", g.date[1])
-        out[i] = DataFrame(id = g.id, window = g.window)
-        (isnothing(ef) || isnothing(fg)) && continue
-        try
-            e = efw_events(ef, fg, collect(zip(g.w0, g.w1)))
-            out[i] = hcat(out[i], select(e, Not([:Bx, :By, :Bz])))
-        catch err
-            @warn "efw failed" g.date[1] exception = err
-        end
+"""Per-event efw windows `w0`, `w1` and their kind `window`: the detector's TDS window (`tw`, from tdswindow.jl) where it
+found one, else Lang's [start, end + 1 s] (his times are 1 s floors)."""
+efw_windows(ev, tw = nothing) = isnothing(tw) ?
+    transform(ev, [:start_time, :end_time] => ByRow((a, b) -> (a, b + Second(1), "list")) => [:w0, :w1, :window]) :
+    transform(leftjoin(ev, select(tw, :id, :tds_start, :tds_end); on = :id), [:start_time, :end_time, :tds_start, :tds_end] =>
+        ByRow((a, b, c, d) -> ismissing(c) ? (a, b + Second(1), "list") : (c, d, "tds")) => [:w0, :w1, :window])
+
+"Day function of efw products: `f(efw_calibrated(d, windows))`, `nothing` without efw or FGM files."
+efw_day(f) = (d, w) -> isnothing(input(d, :efw)) || isnothing(input(d, :fgm)) ? nothing : f(efw_calibrated(d, collect(zip(w.w0, w.w1))))
+
+const EFW = DailyProduct("efw", ["scripts/efw.jl"], [:efw, :fgm], efw_day(efw_stats!))
+
+efw_job(p, W) = perday(p, select(W, :id, :w0, :w1), Date.(W.start_time))
+
+"Per-event `efw_*` columns from `daily` results `res` of `efw_job(EFW, W)`."
+function efw_table(W, (_, items), res)
+    kind = Dict(zip(W.id, W.window))
+    out = map(items, res) do (_, _, a), e
+        df = DataFrame(id = a.id, window = [kind[i] for i in a.id])
+        isnothing(e) ? df : hcat(df, select(e, Not([:Bx, :By, :Bz])))
     end
     df = reduce((a, b) -> vcat(a, b; cols = :union), out)
     rename!(c -> c == "id" ? c : "efw_" * c, df)

@@ -1,0 +1,12 @@
+name,unit,description
+id,"","event (row of tds_tha) owning the pulse: the one whose [start, end + 1 s] contains it, else the nearest one its TDS train overlaps"
+"time, t_unix","UT, s","pulse peak time (ms precision), and as unix seconds (µs precision)"
+"burst, train, train_class","","burst number within the day and train number within the burst (as in detect/out), class of the train"
+chan,"","detection channel: Epar (E·b̂) or Ez (spin axis, without b̂)"
+amplitude,mV/m,signed peak on the 150 Hz high-passed detection channel
+"width_ms, fit_s_ms",ms,half-maximum width of the peak lobe; σ of the best Gaussian / Gaussian-derivative fit
+pulse_shape,"","bipolar (Gaussian-derivative fit dominates), unipolar (Gaussian dominates) or mixed"
+Epar_ratio,"",|E∥|/|E⊥| of the fitted template in the pulse's own band
+phi,deg,spin phase at the peak
+"snr, iso, ctr","",peak over the burst's quiet-time σ; peak over the rms within ±10 ms excluding the pulse; peak over the median-based σ there
+"kurt, fit_R","",kurtosis within ±25 ms; residual fraction of the template fit (≈ 0 for an isolated single structure)

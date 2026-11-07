@@ -41,11 +41,10 @@ efw_window,"",ours,"window of all efw_* stats: tds = detector TDS window (tds_st
 "efw_n, efw_ac","",ours,"# efw waveform samples in the window (8192 or 16384 S/s), fraction AC-coupled"
 "efw_t_Ez, efw_Ez, efw_Eperp_Ez, efw_ratio_Ez, efw_phi_Ez","UT, mV/m, mV/m, –, deg",ours,"at max |Ez| (DSL spin axis; own L1 calibration, 100–3000 Hz band-pass, boom-shadow phases masked): time, signed Ez, in-band |E⊥B|, |Ez|/|E⊥|, spin phase"
 "efw_t_Epar, efw_Epar, efw_Eperp_Epar, efw_ratio_Epar, efw_phi_Epar","UT, mV/m, mV/m, –, deg",ours,"same at max |E∥|, E∥ = E·b̂ with b̂ the window-median B"
-efw_phase_flag,"",ours,true if max |E∥| or |Ez| falls at an over-populated spin phase (likely artifact)
 "efw_rms_Ez, efw_rms_Exy",mV/m,ours,in-band rms Ez and spin-plane |E| over the window
 efw_clip,"",ours,"fraction of samples with a raw channel at the ADC rail (±32767, or −32768 = fill); > 0 ⇒ maxima are lower bounds (spin-plane AC saturates near 70 mV/m)"
 "Epar_norm, Ez_norm","",ours,"e|E∥|λ_D/T_e (≈ eφ/T_e for a Debye-scale structure), same with |Ez|"
-det_status,"",ours,"automatic detector (detect/report.typ) on the bursts overlapping [start, end + 1 s]: tds, no_tds, no_b (no b̂, never TDS), no_burst (none ≥ 4096 samples)"
-"tds_start, tds_end",UT,ours,"span of the detector's TDS trains in the interval: the TDS window, which Lang's list does not record"
-"tds_n_trains, tds_n_pulses, tds_class","",ours,number of TDS trains and TDS-like pulses; class (bipolar/unipolar/mixed) of the train with most pulses
-"tds_peak, tds_Epar_ratio, tds_clip","mV/m, –, –",ours,"largest TDS-like pulse (signed, E∥ or Ez, 150 Hz high-pass) and its in-band |E∥|/|E⊥|; max rail-sample fraction near the trains (> 0 ⇒ lower bound)"
+det_status,"",ours,"automatic detector (detect/report.typ) on the bursts overlapping [start, end + 1 s]: tds (the event owns TDS pulses, see tds_tha_pulses), no_tds, no_b (no b̂, never TDS), no_burst (none ≥ 4096 samples)"
+"tds_start, tds_end",UT,ours,"first to last of the event's TDS pulses ± 10 ms: the TDS window, which Lang's list does not record"
+"tds_n_trains, tds_n_pulses, tds_class","",ours,"number of TDS trains holding the event's TDS pulses, and of those pulses; class (bipolar/unipolar/mixed) of the train holding most of them"
+"tds_peak, tds_Epar_ratio, tds_clip","mV/m, –, –",ours,"largest of the event's TDS pulses (signed, E∥ or Ez, 150 Hz high-pass) and its in-band |E∥|/|E⊥|; max rail-sample fraction near its trains (> 0 ⇒ lower bound)"

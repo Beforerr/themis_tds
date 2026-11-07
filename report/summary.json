@@ -47,18 +47,25 @@
   "det_status": {
     "no_b": 0.001438,
     "no_burst": 0.0002696,
-    "no_tds": 0.189,
-    "tds": 0.8093
+    "no_tds": 0.2003,
+    "tds": 0.798
   },
-  "frac_bg_unsteady": 0.2394,
+  "efw_example": {
+    "date": "2021-06-05",
+    "max": 5.126,
+    "phi": 280.8,
+    "raw_max": 38.17,
+    "raw_phi": 46.1,
+    "raw_t": 2.233
+  },
+  "frac_bg_unsteady": 0.2406,
   "frac_burst_moments": 0.858,
-  "frac_clip": 0.2041,
+  "frac_clip": 0.1723,
   "frac_efw": 0.9997,
-  "frac_fgm": 0.9907,
+  "frac_fgm": 0.9997,
   "frac_moments": 0.9788,
-  "frac_phase_flag": 0.01906,
   "lang_corr_B_z": 0.8937,
-  "lang_corr_efw_Epar": 0.8417,
+  "lang_corr_efw_Epar": 0.8634,
   "mom_mask": {
     "ele_lowN": 0.007011,
     "ion_isotropic": 0.001798,
@@ -66,47 +73,54 @@
   },
   "n_days": 2413,
   "n_events": 11126,
-  "pipeline": "b0419c0f40",
+  "pipeline": "757f49207a-dirty",
   "region": {
     "PS": {
       "N": 1724,
       "bg_unsteady": 0.1085,
-      "clip": 0.1404
+      "clip": 0.1206
     },
     "PSBL": {
       "N": 1943,
       "bg_unsteady": 0.03603,
-      "clip": 0.1642
+      "clip": 0.1451
     },
     "dayside/inner": {
       "N": 2285,
       "bg_unsteady": 0.1602,
-      "clip": 0.2118
+      "clip": 0.1851
     },
     "lobe": {
       "N": 486,
       "bg_unsteady": 0.02881,
-      "clip": 0.3889
+      "clip": 0.3272
     },
     "sheath/SW": {
       "N": 4392,
       "bg_unsteady": 0.4479,
-      "clip": 0.2209
+      "clip": 0.1806
     },
     "unknown": {
       "N": 296,
-      "bg_unsteady": 0.1813,
-      "clip": 0.2253
+      "bg_unsteady": 0.2457,
+      "clip": 0.1775
     }
   },
-  "tds_efw_corr": 0.9392,
+  "tds_efw_corr": 0.9592,
+  "tds_efw_within20": 0.7522,
   "tds_frac_by_region": {
-    "PS": 0.8654,
-    "PSBL": 0.9213,
-    "dayside/inner": 0.8118,
-    "lobe": 0.9527,
-    "sheath/SW": 0.7329,
-    "unknown": 0.625
+    "PS": 0.8573,
+    "PSBL": 0.912,
+    "dayside/inner": 0.7982,
+    "lobe": 0.9486,
+    "sheath/SW": 0.7199,
+    "unknown": 0.6115
   },
-  "tds_span_med": 3.762
+  "tds_multi_train": 0.5158,
+  "tds_pulses_q": [
+    5.0,
+    26.0,
+    109.0
+  ],
+  "tds_span_med": 2.745
 }

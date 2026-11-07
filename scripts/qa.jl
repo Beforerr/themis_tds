@@ -1,7 +1,7 @@
 # Dataset quality figures and the numbers quoted in report/report.typ → report/figs/, report/summary.json.
 # `julia --project=. scripts/qa.jl` (after build.jl and bgwindow.jl)
 using CSV, DataFrames, DataFramesMeta, Dates, Statistics, StatsBase
-include("table.jl")
+include("table.jl"); include("efw.jl")
 
 const ROOT = joinpath(@__DIR__, "..")
 const FIG = mkpath(joinpath(ROOT, "report", "figs"))
@@ -18,7 +18,6 @@ S["frac_burst_moments"] = mean(>=(2), coalesce.(df.mom_burst, 0))
 S["mom_mask"] = Dict("ion_lowN" => mean(df.mom_mask .& 1 .> 0), "ele_lowN" => mean(df.mom_mask .& 2 .> 0),
     "ion_isotropic" => mean(df.mom_mask .& 4 .> 0))
 S["frac_clip"] = mean(>(0), good(df.efw_clip))
-S["frac_phase_flag"] = mean(coalesce.(df.efw_phase_flag, false)[coalesce.(df.efw_n, 0) .> 0])
 S["frac_bg_unsteady"] = mean(>(30), good(df.bg_rot))
 S["region"] = Dict(g.region[1] => Dict("N" => nrow(g), "clip" => frac(>(0), good(g.efw_clip)),
     "bg_unsteady" => frac(>(30), good(g.bg_rot))) for g in groupby(df, :region))
@@ -28,18 +27,86 @@ S["det_status"] = Dict(k => count(==(k), df.det_status) / nrow(df) for k in uniq
 let tw = df[df.det_status .== "tds", :], m = fin.(tw.tds_peak) .& fin.(tw.efw_Epar)
     S["tds_span_med"] = median(datetime2unix.(tw.tds_end) .- datetime2unix.(tw.tds_start))
     S["tds_efw_corr"] = corspearman(abs.(tw.tds_peak[m]), abs.(tw.efw_Epar[m]))
+    S["tds_pulses_q"] = quantile(tw.tds_n_pulses, [0.1, 0.5, 0.9])
+    S["tds_multi_train"] = mean(tw.tds_n_trains .> 1)
+    S["tds_efw_within20"] = mean(abs.(abs.(tw.efw_Epar[m]) ./ abs.(tw.tds_peak[m]) .- 1) .< 0.2)
     S["tds_frac_by_region"] = Dict(g.region[1] => mean(g.det_status .== "tds") for g in groupby(df, :region))
 end
 
-# spin phase of the efw maxima: clusters are spin-synchronous artifacts (efw_phase_flag)
-let f = Figure(size = (1000, 300))
-    for (k, (c, flag, lab)) in enumerate([(:efw_phi_Epar, :efw_phase_flag, "max |E∥|"), (:efw_phi_Ez, :efw_phase_flag, "max |Ez|")])
-        ax = Axis(f[1, k]; xlabel = "spin phase at $lab (deg)", ylabel = k == 1 ? "events" : "", xticks = 0:45:360)
-        kept = .!coalesce.(df[!, flag], true)
-        hist!(ax, good(df[!, c]); bins = 0:2:360, color = :gray, label = "all")
-        hist!(ax, good(df[kept, c]); bins = 0:2:360, label = "not flagged")
-        k == 1 && axislegend(ax; framevisible = false, labelsize = 10)
+# waveform cleaning (scripts/efwstages.jl): one burst before/after, and the spin phase of max |E∥| at each stage;
+# clusters at fixed phases are spin-synchronous artifacts
+"One burst (scripts/efwstages.jl) in `g`: spin phase, E∥ calibrated and cleaned with their maxima, zooms on the cleaned max."
+function fig_example!(g, X, ex; zoom = (0.1, 0.005))
+    masked = [any(((lo, hi),) -> lo <= x < hi, EFW_MASK) for x in X.phase]
+    m = findall(masked)
+    runs = [(X.t[m[first(r)]], X.t[m[last(r)]]) for r in find_continuous_indexranges(m, 1)]
+    X = transform(X, [:bp, :phase] => ByRow((v, p) -> any(((lo, hi),) -> lo <= p < hi, EFW_MASK) ? NaN : coalesce(v, NaN)) => :final)
+    t0 = ex.tds_start
+    tr = X.t[argmax(abs.(coalesce.(X.raw, 0)))]
+    tf = Dates.value(ex.efw_t_Epar - t0) / 1000   # efw_t_Epar has ms precision: refine to the sample
+    near = findall(x -> abs(x - tf) <= 2e-3, X.t)
+    tf = X.t[near[argmax(abs.(replace(X.final[near], NaN => 0)))]]
+    ax0 = Axis(g[1, 1]; ylabel = "spin phase\n(deg)", yticks = 0:180:360, xticklabelsvisible = false)
+    hspan!(ax0, collect(first.(EFW_MASK)), collect(last.(EFW_MASK)); color = (:orange, 0.3))
+    s = 1:40:nrow(X)
+    scatter!(ax0, X.t[s], X.phase[s]; markersize = 1.5, color = :black)
+    axs = [ax0]
+    for (k, (c, lab, tm, col)) in enumerate([(:raw, "calibrated", tr, :red), (:final, "100–3000 Hz,\nmasked", tf, :blue)])
+        ax = Axis(g[k+1, 1]; ylabel = "E∥ (mV/m)\n$lab", xlabel = k == 2 ? "s after $(Dates.format(t0, "yyyy-mm-dd HH:MM:SS.sss"))" : "",
+            xticklabelsvisible = k == 2)
+        vspan!(ax, first.(runs), last.(runs); color = (:orange, 0.3))
+        lines!(ax, X.t, coalesce.(X[!, c], NaN); color = :black, linewidth = 0.4)
+        i = argmin(abs.(X.t .- tm))
+        scatter!(ax, [X.t[i]], [X[i, c]]; color = col, markersize = 8, marker = :circle, strokewidth = 0)
+        push!(axs, ax)
     end
+    for (tm, col) in ((tr, :red), (tf, :blue)), ax in axs
+        vlines!(ax, tm; color = (col, 0.5), linewidth = 1, linestyle = :dash)
+    end
+    linkxaxes!(axs...)
+    # A TDS is a train of ms pulses with E∥ ≫ E⊥; the calibrated trace checks the band-pass did not shape the pulse.
+    rel(h) = (w = abs.(X.t .- tf) .<= h; (w, 1e3 .* (X.t[w] .- tf)))
+    w, ms = rel(zoom[1])
+    zg = GridLayout(g[1:3, 2])
+    z1 = Axis(zg[1, 1]; title = "cleaned E∥ max: train", xlabel = "ms", ylabel = "mV/m")
+    lines!(z1, ms, X.final[w]; color = :blue, linewidth = 0.6)
+    w, ms = rel(zoom[2])
+    z2 = Axis(zg[2, 1]; title = "single pulse", xlabel = "ms from the cleaned E∥ max", ylabel = "mV/m")
+    lines!(z2, ms, coalesce.(X.raw[w], NaN) .- median(skipmissing(X.raw[w])); color = :gray, linewidth = 1, label = "E∥ calibrated")
+    lines!(z2, ms, coalesce.(X.perp1[w], NaN); color = :orange, label = "E⊥1")
+    lines!(z2, ms, coalesce.(X.perp2[w], NaN); color = :green, label = "E⊥2")
+    lines!(z2, ms, X.final[w]; color = :blue, label = "E∥")
+    axislegend(z2; framevisible = false, labelsize = 9, position = :rb, rowgap = 0)
+    colsize!(g, 2, Relative(0.27))
+    rowsize!(g, 1, Relative(0.16))
+    g
+end
+
+let f = Figure(size = (1000, 800)), St = CSV.read(joinpath(ROOT, "data", "efw_stages.csv"), DataFrame), edges = 0:2:360
+    X = CSV.read(joinpath(ROOT, "data", "efw_example.csv"), DataFrame)
+    ex = only(eachrow(df[df.id .== X.id[1], :]))
+    fig_example!(GridLayout(f[1, 1:3]), X, ex)
+    i = argmax(abs.(coalesce.(X.raw, 0)))
+    S["efw_example"] = Dict("date" => string(Date(ex.tds_start)), "raw_max" => abs(X.raw[i]), "raw_t" => X.t[i], "raw_phi" => X.phase[i],
+        "max" => abs(ex.efw_Epar), "phi" => ex.efw_phi_Epar)
+    late = Dict(r.id => r.start_time >= DateTime(2016, 7) for r in eachrow(df))
+    final = DataFrame(id = df.id, stage = "final", phi = df.efw_phi_Epar)
+    x = edges[1:end-1] .+ step(edges) / 2
+    counts(v) = fit(Histogram, collect(good(v)), edges).weights
+    for (k, (g, lab)) in enumerate([("raw", "calibrated"), ("band-pass", "+ 100–3000 Hz"), ("final", "+ phase mask (table)")])
+        s = g == "final" ? final : St[St.stage .== g, :]
+        L = [get(late, i, false) for i in s.id]
+        ax = Axis(f[2, k]; title = lab, xlabel = "spin phase at max |E∥| (deg)", ylabel = k == 1 ? "events" : "", xticks = 0:90:360)
+        vspan!(ax, collect(first.(EFW_MASK)), collect(last.(EFW_MASK)); color = (:orange, 0.3))
+        early = counts(s.phi[.!L])
+        barplot!(ax, x, early; gap = 0, color = :gray, label = "before 2016-07")
+        barplot!(ax, x, counts(s.phi[L]); offset = early, gap = 0, color = :steelblue, label = "from 2016-07")
+        k == 1 && axislegend(ax; framevisible = false, labelsize = 10, position = :rt)
+    end
+    for (r, l) in ((1, "a"), (2, "b"))
+        Label(f[r, 1, TopLeft()], l; fontsize = 16, font = :bold, padding = (0, 10, 5, 0), halign = :right)
+    end
+    rowsize!(f.layout, 2, Relative(0.3))
     save_fig("efw_quality", f)
 end
 

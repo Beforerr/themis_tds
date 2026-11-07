@@ -47,20 +47,9 @@ function derive!(df)
     @. df.Vi_t = sqrt(df.Vi_x^2 + df.Vi_y^2 + df.Vi_z^2)
     r = @. sqrt(df.gsm_x^2 + df.gsm_y^2 + df.gsm_z^2)
     @. df.r_over_rmp = r / shue98(acos(df.gsm_x / r), df.BZ_GSM, df.Pressure)
-    df.efw_phase_flag = phase_flag(df.efw_phi_Epar) .| phase_flag(df.efw_phi_Ez)
     df.region = region.(df.r_over_rmp, df.Ni, df.Ti, df.beta, df.gsm_x)
     df
 end
-
-"""Peaks of spin-synchronous artifacts (boom shadow/wake) recur at fixed spin phases across events:
-flag events whose peak phase falls in a 2° bin holding > `k`× the median bin count."""
-function phase_flag(φ; k = 2.5)
-    b = [fin(x) ? floor(Int, mod(x, 360) / 2) + 1 : 0 for x in φ]
-    c = [count(==(i), b) for i in 1:180]
-    bad = c .> k * max(median(c), 1)
-    [i > 0 && bad[i] for i in b]
-end
-fin(x) = !ismissing(x) && isfinite(x)
 
 "Heuristic plasma region; thresholds follow common usage (β_PS > 0.5, β_PSBL 0.05–0.5; e.g. Baumjohann et al. 1989)."
 function region(rr, n, Ti, β, x)
@@ -120,14 +109,28 @@ const COLUMNS = [
         "at max |Ez| (DSL spin axis; own L1 calibration, 100–3000 Hz band-pass, boom-shadow phases masked): time, signed Ez, in-band |E⊥B|, |Ez|/|E⊥|, spin phase"),
     ([:efw_t_Epar, :efw_Epar, :efw_Eperp_Epar, :efw_ratio_Epar, :efw_phi_Epar], "UT, mV/m, mV/m, –, deg",
         "same at max |E∥|, E∥ = E·b̂ with b̂ the window-median B"),
-    ([:efw_phase_flag], "", "true if max |E∥| or |Ez| falls at an over-populated spin phase (likely artifact)"),
     ([:efw_rms_Ez, :efw_rms_Exy], "mV/m", "in-band rms Ez and spin-plane |E| over the window"),
     ([:efw_clip], "", "fraction of samples with a raw channel at the ADC rail (±32767, or −32768 = fill); > 0 ⇒ maxima are lower bounds (spin-plane AC saturates near 70 mV/m)"),
     ([:Epar_norm, :Ez_norm], "", "e|E∥|λ_D/T_e (≈ eφ/T_e for a Debye-scale structure), same with |Ez|"),
-    ([:det_status], "", "automatic detector (detect/report.typ) on the bursts overlapping [start, end + 1 s]: tds, no_tds, no_b (no b̂, never TDS), no_burst (none ≥ 4096 samples)"),
-    ([:tds_start, :tds_end], "UT", "span of the detector's TDS trains in the interval: the TDS window, which Lang's list does not record"),
-    ([:tds_n_trains, :tds_n_pulses, :tds_class], "", "number of TDS trains and TDS-like pulses; class (bipolar/unipolar/mixed) of the train with most pulses"),
-    ([:tds_peak, :tds_Epar_ratio, :tds_clip], "mV/m, –, –", "largest TDS-like pulse (signed, E∥ or Ez, 150 Hz high-pass) and its in-band |E∥|/|E⊥|; max rail-sample fraction near the trains (> 0 ⇒ lower bound)"),
+    ([:det_status], "", "automatic detector (detect/report.typ) on the bursts overlapping [start, end + 1 s]: tds (the event owns TDS pulses, see tds_tha_pulses), no_tds, no_b (no b̂, never TDS), no_burst (none ≥ 4096 samples)"),
+    ([:tds_start, :tds_end], "UT", "first to last of the event's TDS pulses ± 10 ms: the TDS window, which Lang's list does not record"),
+    ([:tds_n_trains, :tds_n_pulses, :tds_class], "", "number of TDS trains holding the event's TDS pulses, and of those pulses; class (bipolar/unipolar/mixed) of the train holding most of them"),
+    ([:tds_peak, :tds_Epar_ratio, :tds_clip], "mV/m, –, –", "largest of the event's TDS pulses (signed, E∥ or Ez, 150 Hz high-pass) and its in-band |E∥|/|E⊥|; max rail-sample fraction near its trains (> 0 ⇒ lower bound)"),
+]
+
+# data/tds_tha_pulses.parquet: one row per TDS pulse, with its owning event (event_pulses); detector definitions in detect/detect.jl.
+const PULSE_COLUMNS = [
+    ([:id], "", "event (row of tds_tha) owning the pulse: the one whose [start, end + 1 s] contains it, else the nearest one its TDS train overlaps"),
+    ([:time, :t_unix], "UT, s", "pulse peak time (ms precision), and as unix seconds (µs precision)"),
+    ([:burst, :train, :train_class], "", "burst number within the day and train number within the burst (as in detect/out), class of the train"),
+    ([:chan], "", "detection channel: Epar (E·b̂) or Ez (spin axis, without b̂)"),
+    ([:amplitude], "mV/m", "signed peak on the 150 Hz high-passed detection channel"),
+    ([:width_ms, :fit_s_ms], "ms", "half-maximum width of the peak lobe; σ of the best Gaussian / Gaussian-derivative fit"),
+    ([:pulse_shape], "", "bipolar (Gaussian-derivative fit dominates), unipolar (Gaussian dominates) or mixed"),
+    ([:Epar_ratio], "", "|E∥|/|E⊥| of the fitted template in the pulse's own band"),
+    ([:phi], "deg", "spin phase at the peak"),
+    ([:snr, :iso, :ctr], "", "peak over the burst's quiet-time σ; peak over the rms within ±10 ms excluding the pulse; peak over the median-based σ there"),
+    ([:kurt, :fit_R], "", "kurtosis within ±25 ms; residual fraction of the template fit (≈ 0 for an isolated single structure)"),
 ]
 
 const CACHE = joinpath(@__DIR__, "..", "data", "cache")
@@ -159,18 +162,20 @@ catch
 end
 
 const FULL_TABLE = joinpath(@__DIR__, "..", "data", "tds_tha.csv")
+const PULSE_TABLE = joinpath(@__DIR__, "..", "data", "tds_tha_pulses.parquet")
 
 function build(; out = FULL_TABLE, sample = nothing)
     ev = read_events()
-    src(fs...) = [joinpath(@__DIR__, "..", "data", "raw", "AllData.zip"); [joinpath(@__DIR__, f) for f in ("events.jl", fs...)]]
-    # the cache holds whole stages, so a sample bypasses it
-    stage = isnothing(sample) ? cached : (f, _, _) -> f()
     isnothing(sample) || (ev = sample_days(ev, sample))
-    th = stage(() -> themis_params(ev), "themis", src("themis.jl"))
-    om = stage(() -> omni_params(ev), "omni", src("omni.jl"))
-    tw = tds_windows(ev)
-    det = filter(isfile, joinpath.(DETECT_OUT, ["bursts.csv", "detections.csv"]))
-    ef = stage(() -> efw_params(ev, tw), "efw", [src("efw.jl", "themis.jl", "tdswindow.jl"); det])
+    # OMNI is one whole-mission stage, so a sample bypasses its cache
+    om = isnothing(sample) ? cached(() -> omni_params(ev), "omni", [joinpath(@__DIR__, "..", "data", "raw", "AllData.zip");
+        joinpath.(@__DIR__, ["events.jl", "omni.jl"])]) : omni_params(ev)
+    ep = event_pulses(ev)
+    tw = tds_windows(ev, ep)
+    W = efw_windows(ev, tw)
+    jobs = [themis_job(ev), efw_job(EFW, W)]
+    rth, ref = daily(jobs; files = dayfile)
+    th, ef = themis_table(jobs[1], rth), efw_table(W, jobs[2], ref)
     df = leftjoin(leftjoin(ev, th; on = :id), om; on = :id)
     df = leftjoin(df, ef; on = :id)
     isnothing(tw) || (df = leftjoin(df, tw; on = :id))
@@ -184,13 +189,23 @@ function build(; out = FULL_TABLE, sample = nothing)
     if isnothing(sample)
         CSV.write(joinpath(dirname(out), "columns.csv"), DataFrame(name = [join(c, ", ") for (c, _, _) in COLUMNS],
             unit = getindex.(COLUMNS, 2), source = [src_of(c) for (c, _, _) in COLUMNS], description = last.(COLUMNS)))
-        # Typed copy for pandas/polars; the column dictionary rides along as file metadata "columns" (JSON).
-        unit_of(c, u, k) = (us = split(u, ", "); length(us) == length(c) ? us[k] : u)   # one unit per column of the group, or one for all
-        dict = Dict(string(n) => Dict("unit" => unit_of(c, u, k), "source" => src_of(c), "description" => d)
-            for (c, u, d) in COLUMNS for (k, n) in enumerate(c))
-        Parquet2.writefile(replace(out, r"\.csv$" => ".parquet"), df; metadata = Dict("columns" => JSON.json(dict), "pipeline" => pipeline_version()))
+        write_parquet(replace(out, r"\.csv$" => ".parquet"), df, COLUMNS, src_of)
+        tp = tds_pulses(ep)
+        if !isnothing(tp)
+            CSV.write(joinpath(dirname(out), "pulse_columns.csv"), DataFrame(name = [join(c, ", ") for (c, _, _) in PULSE_COLUMNS],
+                unit = getindex.(PULSE_COLUMNS, 2), description = last.(PULSE_COLUMNS)))
+            write_parquet(PULSE_TABLE, select(tp, reduce(vcat, first.(PULSE_COLUMNS))), PULSE_COLUMNS, _ -> "ours")
+        end
     end
     df
+end
+
+"Typed table for pandas/polars; the column dictionary rides along as file metadata \"columns\" (JSON)."
+function write_parquet(path, df, columns, src_of)
+    unit_of(c, u, k) = (us = split(u, ", "); length(us) == length(c) ? us[k] : u)   # one unit per column of the group, or one for all
+    dict = Dict(string(n) => Dict("unit" => unit_of(c, u, k), "source" => src_of(c), "description" => d)
+        for (c, u, d) in columns for (k, n) in enumerate(c))
+    Parquet2.writefile(path, df; metadata = Dict("columns" => JSON.json(dict), "pipeline" => pipeline_version()))
 end
 
 "Rebuild `n` days and print how they differ from the full table."
@@ -198,8 +213,7 @@ function check_sample(n = 24; rtol = 1e-6, atol = 1e-6)
     out = joinpath(@__DIR__, "..", "data", "cache", "sample_tds_tha.csv")
     mkpath(dirname(out))
     @time build(; out, sample = n)
-    # `efw_phase_flag` is a statistic over all events, so a sample's differs from the full table's
-    compare_tables(CSV.read(FULL_TABLE, DataFrame), CSV.read(out, DataFrame); rtol, atol, skip = [:efw_phase_flag])
+    compare_tables(CSV.read(FULL_TABLE, DataFrame), CSV.read(out, DataFrame); rtol, atol)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__()

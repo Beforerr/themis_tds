@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mirror THEMIS-A daily CDFs (Berkeley server; SPDF via MIRROR=https://spdf.gsfc.nasa.gov/pub/data/themis is several times slower) for event dates. Usage: download.sh <level/product> (e.g. l2/fgm)
+# Mirror THEMIS-A daily CDFs (Berkeley server; SPDF via MIRROR=https://spdf.gsfc.nasa.gov/pub/data/themis is several times slower) for the dates in data/dates.txt (scripts/dates.jl). Usage: download.sh <level/product> (e.g. l2/fgm)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 prod=$1; name=$(basename "$prod"); lvl=$(dirname "$prod")

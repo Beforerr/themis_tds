@@ -12,12 +12,13 @@ function bgwindow(df = CSV.read(joinpath(@__DIR__, "..", "data", "tds_tha.csv"),
     days = collect(groupby(transform(df, :start_time => ByRow(Date) => :date), :date))
     out = Vector{Vector{NamedTuple}}(undef, length(days))
     Threads.@threads for i in eachindex(days)
-        g = days[i]; f = dayfile("fgm", g.date[1])
+        g = days[i]; d = ProbeDay("tha", g.date[1], dayfile)
         out[i] = NamedTuple[]
-        isnothing(f) && continue
-        fgs = readseries(CDFDataset(f), "tha_fgs_time", "tha_fgs_gsm")
-        for r in eachrow(g)
-            tc = (datetime2unix(DateTime(r.start_time)) + datetime2unix(DateTime(r.end_time))) / 2
+        isnothing(input(d, :fgm)) && continue
+        tcs = [(datetime2unix(DateTime(r.start_time)) + datetime2unix(DateTime(r.end_time))) / 2 for r in eachrow(g)]
+        Wmax = maximum(HALF_WINDOWS)
+        fgs = readseries(d, :fgm, "tha_fgs_time", "tha_fgs_gsm", (minimum(tcs) - Wmax, maximum(tcs) + Wmax))
+        for (r, tc) in zip(eachrow(g), tcs)
             B = [r.B_x, r.B_y, r.B_z]; V = [r.Vi_x, r.Vi_y, r.Vi_z]
             ref, = wmed(fgs, tc - BG_HALF, tc + BG_HALF)
             for W in HALF_WINDOWS

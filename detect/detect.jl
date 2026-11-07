@@ -1,5 +1,5 @@
 # Automatic TDS detection in THEMIS-A EFW burst waveforms. See detect/report.typ.
-include(joinpath(@__DIR__, "..", "scripts", "themis.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "dayfile.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "efw.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "events.jl"))
 using CSV, StatsBase, TimeseriesUtilities
@@ -14,26 +14,25 @@ struct Burst
     rail::BitVector         # any raw channel at the ADC rail, as efw_events' `clip`
 end
 
-"All calibrated efw bursts (segments split at 0.5 s gaps) of one day."
-function load_day(date; probe = "tha")
-    rd(ds, k) = haskey(ds, k) && length(ds[k]) > 0 ? Array(ds[k]) : nothing
-    ef, ff = dayfile("efw", date), dayfile("fgm", date)
-    (ef === nothing || ff === nothing) && return Burst[]
-    fg = CDFDataset(ff)
-    tl, Bl, Sl = rd(fg, "$(probe)_fgl_time"), rd(fg, "$(probe)_fgl_dsl"), rd(fg, "$(probe)_fgl_ssl")
+"All calibrated efw bursts (segments split at 0.5 s gaps) of one probe-day."
+load_day(date::Date; probe = "tha") = load_day(ProbeDay(probe, date, dayfile))
+function load_day(d::ProbeDay)
+    probe = d.probe
+    rd(kind, k) = dayvar(d, kind, k)
+    (isnothing(input(d, :efw)) || isnothing(input(d, :fgm))) && return Burst[]
+    tl, Bl, Sl = rd(:fgm, "$(probe)_fgl_time"), rd(:fgm, "$(probe)_fgl_dsl"), rd(:fgm, "$(probe)_fgl_ssl")
     (tl === nothing || Sl === nothing) && return Burst[]
     φf, Tspin = spinphase(tl, Sl, Bl)
-    th, Bh = rd(fg, "$(probe)_fgh_time"), rd(fg, "$(probe)_fgh_dsl")
+    th, Bh = rd(:fgm, "$(probe)_fgh_time"), rd(:fgm, "$(probe)_fgh_dsl")
     th === nothing && ((th, Bh) = (tl, Bl))
-    ew = CDFDataset(ef)
-    t, raw = rd(ew, "$(probe)_efw_time"), rd(ew, "$(probe)_efw")
+    t, raw = rd(:efw, "$(probe)_efw_time"), rd(:efw, "$(probe)_efw")
     t === nothing && return Burst[]
-    E, _, ϕ = efi_dsl(t, raw, rd(ew, "$(probe)_efw_hed_time"), rd(ew, "$(probe)_efw_hed_ac"), φf, Tspin)
+    E, _, ϕ = efi_dsl(t, raw, rd(:efw, "$(probe)_efw_hed_time"), rd(:efw, "$(probe)_efw_hed_ac"), φf, Tspin)
     bursts = Burst[]
     for r in find_continuous_indexranges(t, 0.5)
         length(r) < 4096 && continue
         tr = t[r]
-        B = parent(tinterp(tsort(Timed(Float64.(Bh), th; dim = 2)), tr; maxgap = 1.0))
+        B = parent(tinterp(tsort(Timed(Float64.(Bh), th; dim = 2)), tr; max_gap = 1.0))
         fs = round((length(r) - 1) / (tr[end] - tr[1]) / 1024) * 1024
         bt = vec(sqrt.(sum(abs2, B, dims = 1)))
         rail = BitVector([any(v -> !(abs(v) < 32767), view(raw, :, k)) for k in r])
@@ -87,7 +86,6 @@ const PARAMS = (τ = 0.004,          # s, high-pass time scale (cutoff ≈ 150 H
     iso = 3.0, isow = 0.010,        # peak / rms in ±isow s excluding the pulse
     nms = 0.5e-3,                   # s, non-maximum suppression half-window
     satw = 0.02,                    # s, spikes this close to a clipped sample are flagged `sat`
-    shadoww = 10.0, pair = 0.9,     # sun-shadow pulse: ≤ shadoww deg from 45° mod 90° and ≥ pair on one boom pair
     gap = 0.25,                     # s, spikes closer than this form one train
     fitw = 0.003,                   # s, minimum shape-fit half-window
     kw = 0.025,                     # s, half-window for the pulse's local kurtosis
@@ -200,8 +198,8 @@ end
 """
 Band-limited polarization at a pulse: the fitted template (t0, s) is regressed on each filtered DSL
 component, so E∥ and E⊥ are compared in the pulse's own band. Returns `pol` = |E∥|/|E⊥| (3-D) and
-`pair` = largest share of spin-plane template energy on one sensor boom pair (E12 or E34), ≈ 1 when the
-signal sits on a single pair as for sun-shadow pulses, NaN without spin-plane signal. Boom response: a structure of scale L ≲ boom length is
+`pair` = largest share of spin-plane template energy on one sensor boom pair (E12 or E34), ≈ 1 for sun-shadow
+pulses but also for field-aligned pulses when b̂ lies along a pair; NaN without spin-plane signal. Boom response: a structure of scale L ≲ boom length is
 underestimated by the 50 m spin-plane booms but not the 5.6 m axial ones; L = v × width needs the unknown
 structure speed, so no correction is applied (for v ≳ 300 km/s and widths ≳ 0.3 ms, L ≳ 100 m and the
 spin-plane response is ≳ 0.8).
@@ -254,7 +252,7 @@ masked(φ) = any(((lo, hi),) -> lo <= mod(φ, 360) < hi, ARTIFACT_PHASES)
 Pulses and trains of one burst. Candidates on E∥ (if b̂ known) and Ez, noise floor from quiet blocks
 (`quiet_sigma`), are deduplicated within `nms`; those with iso ≥ p.iso and |a| ≥ p.amin are pulses. Each
 gets a shape fit on its detection channel, local kurtosis (±kw), band-limited polarization, artifact flags
-(`sat` clipping nearby, spin-recurrent `rec`, `shadow1`, phase mask → `art`) and the `tdslike` verdict.
+(`sat` clipping nearby, spin-recurrent `rec`, phase mask → `art`) and the `tdslike` verdict.
 Pulses ≤ p.gap apart form trains, with features on the filtered E∥ (Ez without b̂) over the train ± isow:
 `kurt`, `crest`, `duty` (fraction of samples ≥ 3σq), `clip` (fraction at the ADC rail: amplitudes are lower bounds when > 0), TDS-like pulse
 count, shape fractions, width spread, `fce` (Hz) and `class` (`label`).
@@ -279,19 +277,20 @@ function burst_pulses(b::Burst; p = PARAMS)
         x = Dict(chans)[c.chan]
         t0, s, lo, hi, fa, fb, R = shapefit(x, c.i, c.w, p.fitw * b.fs)
         pol, pair = polarization(hp, view(b.bh, :, c.i), b.φ[c.i], t0, s, lo, hi)
-        dshadow = abs(mod(b.φ[c.i], 90) - 45)
         y = view(x, max(1, c.i - K):min(length(x), c.i + K)); m2 = mean(abs2, y)
         push!(P, (i = c.i, t = b.t[c.i], chan = c.chan, a = c.a, snr = c.snr, w_ms = 1000c.w / b.fs, opp = c.opp,
             iso = c.iso, ctr = c.ctr, ac = c.ac, f_ac = c.aclag > 0 ? b.fs / c.aclag : NaN,
             fit_R = R, fit_s_ms = 1000s / b.fs, fit_uni = fa, fit_bip = fb, pol = pol, pair = pair,
-            shadow1 = dshadow <= p.shadoww && pair >= p.pair, kurt = mean(v -> v^4, y) / m2^2,
+            kurt = mean(v -> v^4, y) / m2^2,
             phi = b.φ[c.i], sat = any(view(sat, max(1, c.i - ms):min(length(sat), c.i + ms)))))
     end
     sort!(P, by = r -> r.i)
     T = 360 * (b.t[end] - b.t[1]) / sum(x -> mod(x + 180, 360) - 180, diff(b.φ))
     rec = recurrent([r.t for r in P], [r.phi for r in P], T, b.t[end] - b.t[1])
     P = map(enumerate(P)) do (k, r)
-        art = rec[k] || !isfinite(r.phi) || masked(r.phi) || r.shadow1
+        # No single-pair cut near the shadow phases: a field-aligned pulse also sits on one pair whenever b̂ lies along
+        # it, and outside the mask such pulses are no more frequent near the shadow phases than far from them.
+        art = rec[k] || !isfinite(r.phi) || masked(r.phi)
         v = (r.kurt >= p.kurt) + (r.ctr >= p.ctr) + (r.fit_R <= p.rfit)
         shape = abs(r.fit_bip) >= 2abs(r.fit_uni) ? :bipolar : abs(r.fit_uni) >= 2abs(r.fit_bip) ? :unipolar : :mixed
         (; r..., rec = rec[k], art = art, shape = shape,
@@ -344,8 +343,8 @@ istds(c) = startswith(c, "tds")
 Bursts, pulses and trains of one day. `evd`: Lang events of the day; a burst is Lang-positive if any
 [start, end + 1 s] overlaps it (Lang's times are 1 s floors).
 """
-function process_day(date, evd; p = PARAMS)
-    bs = load_day(date)
+function process_day(d::ProbeDay, evd; p = PARAMS)
+    bs = load_day(d); date = d.date
     brows = []; prows = []; trows = []
     lw = [(datetime2unix(a), datetime2unix(b) + 1) for (a, b) in zip(evd.start_time, evd.end_time)]
     for (k, b) in enumerate(bs)
@@ -360,19 +359,10 @@ function process_day(date, evd; p = PARAMS)
     DataFrame(brows), DataFrame(prows), DataFrame(trows)
 end
 
-"Run `process_day` over `dates` (threaded)."
-function run_days(dates, ev; p = PARAMS)
-    out = Vector{Any}(undef, length(dates)); done = Threads.Atomic{Int}(0)
-    Threads.@threads :greedy for i in eachindex(dates)
-        d = dates[i]
-        out[i] = try
-            process_day(d, filter(r -> Date(r.start_time) == d, ev); p)
-        catch e
-            @warn "day failed" d exception = (e, catch_backtrace())
-            (DataFrame(), DataFrame(), DataFrame())
-        end
-        n = Threads.atomic_add!(done, 1)
-        n % 200 == 0 && @info "days done" n
-    end
-    Tuple(reduce(vcat, DataFrame[o[k] for o in out]; cols = :union) for k in 1:3)
+const DETECT = DailyProduct("detect", ["detect/detect.jl", "scripts/efw.jl"], [:efw, :fgm], process_day)
+
+"Bursts, pulses and trains of the days of events `ev` (`process_day` with `PARAMS`, cached per day)."
+function run_days(ev)
+    res = only(daily([perday(DETECT, select(ev, :id, :start_time, :end_time), Date.(ev.start_time))]; files = dayfile))
+    Tuple(reduce(vcat, DataFrame[isnothing(r) ? DataFrame() : r[k] for r in res]; cols = :union) for k in 1:3)
 end

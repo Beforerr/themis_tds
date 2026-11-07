@@ -1,17 +1,10 @@
 using CDFDatasets, DataFrames, Dates, Statistics, LinearAlgebra, TimeseriesUtilities
+include("dayfile.jl"); @isdefined(ProbeDay) || include("daily.jl")
 
-const CDFDIR = joinpath(@__DIR__, "..", "data", "cdf")
 const BG_HALF = 300.0   # s; background-field window is event center ± 5 min
 const SPIN_HALF = 1.5   # s; a spin-resolution moment sample represents its center ± half a spin
 const CTX_HALF = 60.0   # s; before/after span for the dipolarization ΔBz
 const LOCAL_HALF = 30.0 # s; sheath fields rotate within a minute, so V∥ there needs a short window (scripts/bgwindow.jl)
-
-function dayfile(prod, date)
-    dir = joinpath(CDFDIR, prod)
-    pre = "tha_l$(prod == "efw" ? 1 : 2)_$(prod)_$(Dates.format(date, "yyyymmdd"))_v"
-    i = findlast(f -> startswith(f, pre) && endswith(f, ".cdf"), readdir(dir))
-    isnothing(i) ? nothing : joinpath(dir, readdir(dir)[i])
-end
 
 "Index range of sorted `t` within [a, b]."
 window(t, a, b) = searchsortedfirst(t, a):searchsortedlast(t, b)
@@ -22,7 +15,11 @@ struct Series
 end
 Series() = Series(Float64[], zeros(0, 0))
 
-readseries(ds, tvar, var) = haskey(ds, var) ? Series(Array(ds[tvar]), ds[var]) : Series()
+"Series of `var` over the day, extended into the neighbouring days to cover `span` = (lo, hi) unix s (see `spanvars`)."
+function readseries(d::ProbeDay, kind, tvar, var, span = nothing)
+    tx = isnothing(span) ? (dayvar(d, kind, tvar), dayvar(d, kind, var)) : something(spanvars(d, kind, tvar, (var,), span...), (nothing,))
+    any(isnothing, tx) ? Series() : Series(tx...)
+end
 
 # Series of a variable may share `t`, which is never mutated.
 function Series(t::Vector{Float64}, var::AbstractArray)
@@ -34,7 +31,7 @@ function Series(t::Vector{Float64}, var::AbstractArray)
 end
 
 function wmean(s::Series, a, b; stat = tmean)
-    isempty(s.t) && return (fill(NaN, max(size(s.x, 1), 1)), 0)
+    isempty(s.t) && return (fill(NaN, 3), 0)   # absent variable: NaN for any component a caller reads
     r = window(s.t, a, b)
     n = count(j -> isfinite(s.x[1, j]), r)
     n == 0 ? (fill(NaN, size(s.x, 1)), 0) : (stat(view(s.x, :, r); dim = 2), n)
@@ -64,28 +61,24 @@ end
 
 const MOM_VARS = (n = "density", T = "avgtemp", V = "velocity_gsm", T3 = "magt3", flag = "data_quality")
 
-function moments(ds, kind)
-    names = map(v -> "tha_$(kind)_$v", MOM_VARS)
-    t = any(n -> haskey(ds, n), names) ? Array(ds["tha_$(kind)_time"]) : Float64[]
-    map(n -> haskey(ds, n) ? Series(t, ds[n]) : Series(), names)
-end
+moments(d::ProbeDay, kind, span = nothing) = map(v -> readseries(d, :gmom, "$(d.probe)_$(kind)_time", "$(d.probe)_$(kind)_$v", span), MOM_VARS)
 
-"Per-event THEMIS-A plasma and field parameters for all events on one day."
-function day_params(date, evs)
+"Per-event plasma and field parameters for the events `evs` (id, start_time, end_time) of one probe-day."
+function day_params(d::ProbeDay, evs)
     rows = [Dict{Symbol, Any}(:id => id) for id in evs.id]
-    fgmf, gmf = dayfile("fgm", date), dayfile("gmom", date)
-    (isnothing(fgmf) || isnothing(gmf)) && return rows
-    fgm = CDFDataset(fgmf)
-    fgl = readseries(fgm, "tha_fgl_time", "tha_fgl_gsm")
-    fgs = readseries(fgm, "tha_fgs_time", "tha_fgs_gsm")
-    gm = CDFDataset(gmf)
+    isnothing(input(d, :fgm)) && return rows
+    t0s, t1s = datetime2unix.(evs.start_time), datetime2unix.(evs.end_time)
+    tcs = (t0s .+ t1s) ./ 2
+    span = (min(minimum(t0s) - SPIN_HALF, minimum(tcs) - BG_HALF), max(maximum(t1s) + SPIN_HALF, maximum(tcs) + BG_HALF))
+    fgl = readseries(d, :fgm, "$(d.probe)_fgl_time", "$(d.probe)_fgl_gsm", span)
+    fgs = readseries(d, :fgm, "$(d.probe)_fgs_time", "$(d.probe)_fgs_gsm", span)
     # Burst (bb) moments cover ~98% of events at spin cadence with full angular resolution; reduced (rf) mode
     # is continuous but has too few electron look directions for T⊥/T∥ (≈1 always). Full (ff) mode at event
     # times is sparse and interpolated. Context windows (±5 min) use rf.
-    ion, ele = moments(gm, "ptirf"), moments(gm, "pterf")
-    ionb, eleb = moments(gm, "ptibb"), moments(gm, "ptebb")
+    ion, ele = moments(d, "ptirf", span), moments(d, "pterf", span)
+    ionb, eleb = moments(d, "ptibb", span), moments(d, "ptebb", span)
 
-    for (row, t0, t1) in zip(rows, datetime2unix.(evs.start_time), datetime2unix.(evs.end_time))
+    for (row, t0, t1) in zip(rows, t0s, t1s)
         tc = (t0 + t1) / 2
         # Event-window B: fgl when present, else spin-res fgs
         B, nB = wmed(fgl, t0, t1)
@@ -129,19 +122,13 @@ function day_params(date, evs)
     rows
 end
 
-function themis_params(ev)
-    days = collect(groupby(transform(ev, :start_time => ByRow(Date) => :date), :date))
-    out = Vector{Vector{Dict{Symbol, Any}}}(undef, length(days))
-    Threads.@threads for i in eachindex(days)
-        g = days[i]
-        out[i] = try
-            day_params(g.date[1], g)
-        catch e
-            @warn "day failed" g.date[1] exception = e
-            [Dict{Symbol, Any}(:id => id) for id in g.id]
-        end
-    end
-    rows = reduce(vcat, out)
+const THEMIS = DailyProduct("themis", ["scripts/themis.jl"], [:fgm, :gmom], day_params; neighbours = true)
+
+themis_job(ev) = perday(THEMIS, select(ev, :id, :start_time, :end_time), Date.(ev.start_time))
+
+"Per-event table from `daily` results `res` of `themis_job`; a failed day gives NaN rows."
+function themis_table((_, items), res)
+    rows = reduce(vcat, [something(r, [Dict{Symbol, Any}(:id => id) for id in a.id]) for ((_, _, a), r) in zip(items, res)])
     cols = union(keys.(rows)...)
     concrete(v) = all(x -> x isa Integer, v) ? Int.(v) : float.(v)   # counts/flags are Int unless a failed day left NaN
     DataFrame([c => concrete([get(r, c, c == :id ? 0 : NaN) for r in rows]) for c in cols])

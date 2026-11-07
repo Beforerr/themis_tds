@@ -6,6 +6,9 @@ data/raw/AllData/
 data/*.log
 data/tds_tha.csv
 data/tds_tha.parquet
+data/tds_tha_pulses.parquet
 data/bgwindow.csv
+data/efw_stages.csv
+data/efw_example.csv
 detect/out/**/*.csv
 Manifest.toml

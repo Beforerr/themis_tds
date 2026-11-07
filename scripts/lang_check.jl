@@ -1,6 +1,6 @@
 # Reproduce Lang's list quantities (idl/findthmbrst_v2.pro) from our data on random days → report/lang_check.json.
 # Needs data/tds_tha.csv; fetches FBK L2 for the sampled days into data/cdf/fbk. `julia --project=. -t auto scripts/lang_check.jl`
-using CSV, DataFrames, Statistics, Dates, Random, LinearAlgebra, StatsBase, FFTA, CDFDatasets, TimeseriesUtilities, JSON
+using CSV, DataFrames, Statistics, Dates, Random, StatsBase, CDFDatasets, TimeseriesUtilities, JSON
 include("themis.jl"); include("efw.jl"); include("events.jl")
 
 const NDAYS = 80
@@ -27,54 +27,29 @@ function fbk_ew(path)
     (t = Array(ds[k*"_time"]), ew = vec(sqrt.(3 .* sum(y[2:4, :] .^ 2 .* π^2 ./ 8; dims = 1))), edc12 = k == "tha_fb_edc12")
 end
 
-"max |E∥| and |Ez| in [a, b] after an FFT band-pass f1–f2 per continuous segment; masked spin phases skipped."
-function bandmax(t, E, ϕ, bh, segs, a, b; f1 = 100.0, f2 = 3000.0, masked)
-    par = z = -Inf
-    for r in segs
-        (t[last(r)] < a || t[first(r)] > b || length(r) < 1024) && continue
-        n = length(r); dt = median(diff(t[r]))
-        y = [E[c, k] for k in r, c in 1:3]
-        y[.!isfinite.(y)] .= 0; y .-= mean(y; dims = 1)
-        F = mapslices(fft, complex.(y); dims = 1)
-        F[[!(f1 <= min(i, n - i) / (n * dt) <= f2) for i in 0:n-1], :] .= 0
-        yf = real.(mapslices(ifft, F; dims = 1))
-        for (j, k) in enumerate(r)
-            (a <= t[k] <= b && !masked(rad2deg(ϕ[k]))) || continue
-            par = max(par, abs(dot(bh, view(yf, j, :)))); z = max(z, abs(yf[j, 3]))
-        end
-    end
-    (par = par, z = z)
-end
-
 function day_rows(day, g)
-    ef, fgf, gmf = dayfile("efw", day), dayfile("fgm", day), dayfile("gmom", day)
-    (isnothing(ef) || isnothing(fgf)) && return NamedTuple[]
-    fg = CDFDataset(fgf)
-    fgs = readseries(fg, "tha_fgs_time", "tha_fgs_gsm")
-    tl, Bl, Sl = Array(fg["tha_fgl_time"]), Array(fg["tha_fgl_dsl"]), Array(fg["tha_fgl_ssl"])
-    φf, Tspin = spinphase(tl, Sl, Bl)
-    ew = CDFDataset(ef); t = Array(ew["tha_efw_time"])
+    d = ProbeDay("tha", day, dayfile)
+    (isnothing(input(d, :efw)) || isnothing(input(d, :fgm))) && return NamedTuple[]
     win = [(datetime2unix(r.start_time), datetime2unix(r.end_time) + 1) for r in eachrow(g)]   # Lang's times are 1 s floors
+    span = (minimum(first.(win)) - 30, maximum(first.(win)) + 30)
+    fgs = readseries(d, :fgm, "tha_fgs_time", "tha_fgs_gsm", span)
+    t = dayvar(d, :efw, "tha_efw_time")
     keep = filter(s -> any(w -> t[first(s)] <= w[2] && t[last(s)] >= w[1], win), find_continuous_indexranges(t, 0.5))
-    idx = reduce(vcat, collect.(keep)); tk = t[idx]
-    E, _, ϕ = efi_dsl(tk, Array(ew["tha_efw"])[:, idx], Array(ew["tha_efw_hed_time"]), Array(ew["tha_efw_hed_ac"]), φf, Tspin)
+    tk = t[reduce(vcat, collect.(keep))]
     segs = find_continuous_indexranges(tk, 0.5)
-    ion = isnothing(gmf) ? nothing : moments(CDFDataset(gmf), "ptirf")
+    L = efw_events(d, win)   # our efw stats over the list interval instead of the efw window
+    ion = isnothing(input(d, :gmom)) ? nothing : moments(d, "ptirf", span)
     fb = (f = fbk_file(day); isnothing(f) ? nothing : fbk_ew(f))
-    masked(x) = abs(mod(x, 90) - 45) < 4 || any(w -> abs(mod(x - w + 180, 360) - 180) < 4, (165.0, 346.0))
-    map(zip(eachrow(g), win)) do (r, (a, b))
+    map(enumerate(zip(eachrow(g), win))) do (i, (r, (a, b)))
         s = segs[argmin([abs(tk[first(s)] - a) for s in segs])]
         bs, be = tk[first(s)] - a, tk[last(s)] - b
         B30, = wmean(fgs, a - 30, a + 30)
-        r1 = searchsortedfirst(tl, a):searchsortedlast(tl, b)
-        bh = isempty(r1) ? fill(NaN, 3) : normalize(vec(median(Bl[:, r1]; dims = 2)))
-        m = bandmax(tk, E, ϕ, bh, segs, a, b; masked)
         vx = isnothing(ion) ? NaN : (w = window(ion.V.t, a - 30, a + 30); isempty(w) ? NaN : (v = ion.V.x[1, w]; v[argmax(abs.(v))]))
         fw = isnothing(fb) ? Int[] : findall(x -> a - 30 <= x <= a + 30, fb.t)
         (id = r.id, start = r.start_time, inside = bs <= 1 && be >= -1.5, exact = abs(bs) <= 1.5 && abs(be) <= 1.5,
          lang_Bx = r.lang_Bx, lang_Bz = r.lang_Bz, Bx30 = B30[1], Bz30 = B30[3],
          lang_Vx = r.lang_Vx, Vx30 = vx, Vi_x = r.Vi_x,
-         lang_Ez = r.lang_max_Ez, efw_Epar = abs(r.efw_Epar), bp_par = m.par, bp_z = m.z, flag = r.efw_phase_flag === true,
+         lang_Ez = r.lang_max_Ez, efw_Epar = abs(r.efw_Epar), list_Epar = abs(L.Epar[i]),
          lang_rms = r.lang_rms_Ew, rms30 = isempty(fw) ? NaN : maximum(fb.ew[fw]),
          rms_day = isnothing(fb) ? NaN : maximum(filter(isfinite, fb.ew)), edc12 = isnothing(fb) ? missing : fb.edc12)
     end
@@ -102,7 +77,7 @@ function lang_check()
     R = DataFrame(reduce(vcat, out))
     dB = max.(abs.(R.lang_Bx .- R.Bx30), abs.(R.lang_Bz .- R.Bz30))
     mv = ok(R.lang_Vx, R.Vx30) .& (R.lang_Vx .!= 0)
-    me = ok(R.lang_Ez, R.bp_par, R.efw_Epar) .& .!R.flag
+    me = ok(R.lang_Ez, R.list_Epar, R.efw_Epar)
     f12 = coalesce.(R.edc12, false); f34 = coalesce.(.!R.edc12, false)
     near(x, y) = abs(x - y) <= 0.011    # Lang prints 2 decimals
     ex = only(eachrow(R[R.start .== EXAMPLE, :]))
@@ -120,8 +95,9 @@ function lang_check()
         "rho_V_eventmean" => rho(R.lang_Vx[mv], R.Vi_x[mv]),
         "example" => Dict("lang_Vx" => ex.lang_Vx, "Vx30" => ex.Vx30, "Vi_x" => ex.Vi_x),
         "frac_VxVyVz_plain" => mean(((ev.lang_Vx .== ev.lang_Vy) .& (ev.lang_Vy .== ev.lang_Vz))[ev.plain]),
-        "rho_Ez_raw" => rho(R.lang_Ez[me], R.efw_Epar[me]), "rho_Ez_bp" => rho(R.lang_Ez[me], R.bp_par[me]),
-        "Ez_ratio_bp" => median(R.bp_par[me] ./ R.lang_Ez[me]), "n_Ez" => count(me),
+        "rho_Ez" => rho(R.lang_Ez[me], R.efw_Epar[me]), "Ez_ratio" => median(R.efw_Epar[me] ./ R.lang_Ez[me]),
+        "rho_Ez_list" => rho(R.lang_Ez[me], R.list_Epar[me]), "Ez_ratio_list" => median(R.list_Epar[me] ./ R.lang_Ez[me]),
+        "n_Ez" => count(me),
         "rms_edc12_match" => mean(near.(R.lang_rms[f12], R.rms30[f12])), "n_rms_edc12" => count(f12),
         "rms_edc34_daymax" => mean(near.(R.lang_rms[f34], R.rms_day[f34])), "n_rms_edc34" => count(f34),
         "rms_const_by_year" => Dict(string(k.yr) => mean(v.const_day) for (k, v) in pairs(groupby(transform(g, :date => ByRow(year) => :yr), :yr))),

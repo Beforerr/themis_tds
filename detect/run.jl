@@ -11,8 +11,7 @@ ev = read_events()
 tab = CSV.read(joinpath(@__DIR__, "..", "data", "tds_tha.csv"), DataFrame)
 tab.date = Date.(tab.start_time)
 dreg = Dict(r.date => r.region for r in eachrow(combine(groupby(tab, :date), :region => mode => :region)))
-if !isfile(f_t)
-    B, P, T = run_days(sort(unique(Date.(ev.start_time))), ev)
+let (B, P, T) = run_days(ev)
     B.region = [get(dreg, d, "unknown") for d in B.date]
     cls = combine(groupby(T, [:date, :burst]), :class => (c -> any(istds, c)) => :det,
         :class => (c -> count(istds, c)) => :ntds_trains, :n_tds => sum => :ntds_pulses)
@@ -24,6 +23,16 @@ B = CSV.read(f_b, DataFrame; types = Dict(:lang_ids => String)); B.lang_ids = co
 # explicit DateTime: CSV.jl on Julia 1.14 infers ISO times with ms as Dates.Timestamp{Nanosecond}
 P = CSV.read(f_p, DataFrame); T = CSV.read(f_t, DataFrame; types = Dict(:start_time => DateTime, :end_time => DateTime))
 T = leftjoin(T, select(B, :date, :burst, :lang, :region), on = [:date, :burst])
+
+"""TDS-like pulses per degree within 2–10° of the shadow phases (45° mod 90°, outside the mask) over those per degree
+more than 20° away: 1 if the artifact cuts neither leak nor over-reject near the shadow phases."""
+function tds_phase_near_far(P)
+    φ = P.phi[P.tdslike .& isfinite.(P.phi)]
+    d = abs.(mod.(φ, 90) .- 45)
+    near = (2 .<= d .<= 10) .& .!masked.(φ)
+    nearw = sum(c -> count(x -> !masked(x), c .+ [-10:0.01:-2; 2:0.01:10]) * 0.01, 45:90:315)  # unmasked degrees
+    (count(near) / nearw) / (count(d .> 20) / (4 * 2 * 25))
+end
 
 # ---- agreement with Lang (burst level) ----
 cm(lang, det) = (tp = count(lang .& det), fp = count(.!lang .& det), fn = count(lang .& .!det), tn = count(.!lang .& .!det))
@@ -92,7 +101,8 @@ summary = Dict(
     "burst_clip" => Dict("all" => mean(B.clip .> 0), "lang" => mean(B.clip[B.lang] .> 0), "det" => mean(B.clip[B.det] .> 0)),
     "tds_clip_frac_1pct" => mean(Ttds.clip .> 0.01),
     "params" => Dict(pairs(PARAMS)),
-    "cuts" => Dict("art" => count(P.art), "sat" => count(P.sat), "rec" => count(P.rec), "shadow1" => count(P.shadow1),
+    "tds_phase_near_far" => tds_phase_near_far(P),
+    "cuts" => Dict("art" => count(P.art), "sat" => count(P.sat), "rec" => count(P.rec),
         "pol" => count(.!P.art .& .!(coalesce.(P.pol, NaN) .>= PARAMS.pol))),
 )
 open(io -> JSON.print(io, summary, 1), joinpath(OUT, "summary.json"), "w")
@@ -121,7 +131,7 @@ let fig = Figure(size = (1000, 600), fontsize = 13)
     late = P.date .>= Date(2016, 7, 1); fin = isfinite.(P.phi)
     for (j, (sel, name)) in enumerate(((.!late, "before 2016-07"), (late, "from 2016-07")))
         ax = Axis(fig[j, 1], ylabel = "pulses / 0.5°", title = name, xlabel = j == 2 ? "spin phase φ (deg)" : "")
-        for (m, c, l) in ((sel, :gray60, "all pulses"), (sel .& .!P.rec .& .!P.shadow1, :steelblue, "− recurrent − single-pair shadow"), (sel .& P.tdslike, :black, "TDS-like"))
+        for (m, c, l) in ((sel, :gray60, "all pulses"), (sel .& .!P.rec, :steelblue, "− recurrent"), (sel .& P.tdslike, :black, "TDS-like"))
             stairs!(ax, 0.25:0.5:359.75, fit(Histogram, mod.(P.phi[m .& fin], 360), 0:0.5:360).weights, color = c, label = l, step = :center)
         end
         for (a, b) in ARTIFACT_PHASES; vspan!(ax, a, b, color = (:red, 0.15)); end
